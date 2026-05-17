@@ -1,0 +1,31 @@
+[package]
+name = "mt5-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "A pure Rust library for MetaTrader 5 IPC communication (no Python dependency)"
+license = "MIT"
+repository = "https://github.com/yjkt/mt5-rs"
+documentation = "https://github.com/yjkt/mt5-rs"
+readme = "README.md"
+keywords = ["metatrader", "mt5", "trading", "forex", "ipc"]
+categories = ["api-bindings", "finance"]
+authors = ["yjkt <mpbgp@qq.com>"]
+
+[dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_Pipes",
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+thiserror = "1.0"
+sha2 = "0.10"
+hex = "0.4"
+
+[lib]
+name = "mt5_rs"
+path = "src/lib.rs"
