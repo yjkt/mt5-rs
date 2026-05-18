@@ -155,6 +155,8 @@ impl Drop for NamedPipeClient {
     }
 }
 
+unsafe impl Send for NamedPipeClient {}
+
 pub fn compute_pipe_name(terminal_path: &str) -> String {
     let input = format!(r"\\?\{}", terminal_path.to_lowercase());
     let input_utf16: Vec<u16> = input.encode_utf16().collect();

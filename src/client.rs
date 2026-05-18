@@ -201,34 +201,38 @@ impl Mt5Client {
         let pipe = self.pipe()?;
         let resp = pipe.send(180, &[])?;
 
-        let mut reader = Reader::new(&resp);
-
-        let community_account = reader.read_bool();
-        let community_connection = reader.read_bool();
-        let connected = reader.read_bool();
-        let dlls_allowed = reader.read_bool();
-        let trade_allowed = reader.read_bool();
-        let trade_api_disabled = reader.read_bool();
-        let email_enabled = reader.read_bool();
-        let ftp_enabled = reader.read_bool();
-        let notifications_enabled = reader.read_bool();
-        let mqid = reader.read_bool();
-        let build = reader.read_i64();
-        let max_bars = reader.read_i64();
-        let code_page = reader.read_i64();
-        let ping_last = reader.read_i64();
-        let community_balance = reader.read_f64();
-        let retransmission = reader.read_f64();
-        let company = reader.read_string();
-        let name = reader.read_string();
-        let language = reader.read_string();
-        let path = reader.read_string();
-        let data_path = reader.read_string();
-        let common_data_path = reader.read_string();
-
-        if reader.has_error() {
-            return Err(Mt5Error::InvalidResponse("Failed to read terminal info".into()));
+        if resp.len() < 40 {
+            return Err(Mt5Error::InvalidResponse("Response too short".into()));
         }
+
+        let community_account = resp[2] != 0;
+        let community_connection = resp[3] != 0;
+        let connected = resp[6] != 0;
+        let dlls_allowed = resp[7] != 0;
+        let trade_allowed = resp[8] != 0;
+        let trade_api_disabled = resp[9] != 0;
+        let email_enabled = resp[10] != 0;
+        let ftp_enabled = resp[11] != 0;
+        let notifications_enabled = resp[4] != 0;
+        let mqid = resp[5] != 0;
+
+        let build = u16::from_le_bytes([resp[0], resp[1]]) as i64;
+        let max_bars = u32::from_le_bytes([resp[12], resp[13], resp[14], resp[15]]) as i64;
+        let code_page = u16::from_le_bytes([resp[17], resp[18]]) as i64;
+        let ping_last = u16::from_le_bytes([resp[21], resp[22]]) as i64;
+        let community_balance = f64::from_le_bytes([
+            resp[24], resp[25], resp[26], resp[27], resp[28], resp[29], resp[30], resp[31],
+        ]);
+        let retransmission = f64::from_le_bytes([
+            resp[32], resp[33], resp[34], resp[35], resp[36], resp[37], resp[38], resp[39],
+        ]);
+
+        let company = read_string_at_offset(&resp, 41);
+        let name = read_string_at_offset(&resp, 561);
+        let language = read_string_at_offset(&resp, 1081);
+        let path = read_string_at_offset(&resp, 1601);
+        let data_path = read_string_at_offset(&resp, 2121);
+        let common_data_path = read_string_at_offset(&resp, 2641);
 
         Ok(TerminalInfo {
             community_account,
@@ -1342,4 +1346,22 @@ impl<'a> Reader<'a> {
         self.pos = end;
         String::from_utf16_lossy(&chars)
     }
+}
+
+fn read_string_at_offset(data: &[u8], offset: usize) -> String {
+    if offset >= data.len() {
+        return String::new();
+    }
+    
+    let mut chars = Vec::new();
+    let mut pos = offset;
+    while pos + 1 < data.len() {
+        let c = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        if c == 0 {
+            break;
+        }
+        chars.push(c);
+    }
+    String::from_utf16_lossy(&chars)
 }
