@@ -15,23 +15,26 @@ impl Default for Mt5Client {
 
 impl Mt5Client {
     pub fn new() -> Self {
-        Self { pipe: None, build: 0 }
+        Self {
+            pipe: None,
+            build: 0,
+        }
     }
 
     pub fn initialize(&mut self, pipe_name: Option<&str>) -> Result<()> {
         self.pipe = Some(NamedPipeClient::new(pipe_name)?);
-        
+
         let pipe = self.pipe()?;
         let mut data = Vec::new();
         data.extend_from_slice(&3u32.to_le_bytes());
         data.extend_from_slice(&encode_string("Go"));
-        
+
         let resp = pipe.send(4, &data)?;
         if resp.len() >= 4 {
             let build = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
             self.build = build as i32;
         }
-        
+
         Ok(())
     }
 
@@ -40,9 +43,7 @@ impl Mt5Client {
     }
 
     fn pipe(&self) -> Result<&NamedPipeClient> {
-        self.pipe
-            .as_ref()
-            .ok_or(Mt5Error::NotInitialized)
+        self.pipe.as_ref().ok_or(Mt5Error::NotInitialized)
     }
 
     pub fn login(&self, login: i64, password: &str, server: &str) -> Result<()> {
@@ -82,73 +83,73 @@ impl Mt5Client {
         // 按照 Python 输出和二进制数据验证的精确位置解析
         // Pos 0-7: login (i64)
         let login = reader.read_i64();
-        
+
         // Pos 8-11: trade_mode (i32)
         let trade_mode = reader.read_i32() as i64;
-        
+
         // Pos 12-15: leverage (i32)
         let leverage = reader.read_i32() as i64;
-        
+
         // Pos 16-19: limit_orders (i32)
         let limit_orders = reader.read_i32() as i64;
-        
+
         // Pos 20-23: margin_so_mode (i32)
         let margin_so_mode = reader.read_i32() as i64;
-        
+
         // Pos 24: trade_allowed (bool, 1字节)
         let trade_allowed = reader.read_bool1();
-        
+
         // Pos 25: trade_expert (bool, 1字节)
         let trade_expert = reader.read_bool1();
-        
+
         // Pos 26-29: margin_mode (i32)
         let margin_mode = reader.read_i32() as i64;
-        
+
         // Pos 30-33: currency_digits (i32)
         let currency_digits = reader.read_i32() as i64;
-        
+
         // Pos 34: fifo_close (bool, 1字节)
         let fifo_close = reader.read_bool1();
 
         // Pos 35-42: balance (f64)
         let balance = reader.read_f64();
-        
+
         // Pos 43-50: credit (f64)
         let credit = reader.read_f64();
-        
+
         // Pos 51-58: profit (f64)
         let profit = reader.read_f64();
-        
+
         // Pos 59-66: equity (f64)
         let equity = reader.read_f64();
-        
+
         // Pos 67-74: margin (f64)
         let margin = reader.read_f64();
-        
+
         // Pos 75-82: margin_free (f64)
         let free_margin = reader.read_f64();
-        
+
         // Pos 83-90: margin_level (f64)
         let margin_level = reader.read_f64();
-        
+
         // Pos 91-98: margin_so_call (f64)
         let margin_so_call = reader.read_f64();
-        
+
         // Pos 99-106: margin_so_so (f64)
         let margin_so_so = reader.read_f64();
-        
+
         // Pos 107-114: margin_initial (f64)
         let margin_initial = reader.read_f64();
-        
+
         // Pos 115-122: margin_maintenance (f64)
         let margin_maintenance = reader.read_f64();
-        
+
         // Pos 123-130: assets (f64)
         let assets = reader.read_f64();
-        
+
         // Pos 131-138: liabilities (f64)
         let liabilities = reader.read_f64();
-        
+
         // Pos 139-146: commission_blocked (f64)
         let commission_blocked = reader.read_f64();
 
@@ -314,219 +315,221 @@ impl Mt5Client {
     }
 
     fn decode_symbol_info(reader: &mut Reader) -> Result<SymbolInfo> {
-    // 严格按照 go-mt5 decodeSymbolInfo 的字段顺序和类型解析
-    // 参考：https://github.com/Mukbeast4/go-mt5/blob/main/symbols.go
-    let custom = reader.read_bool1();
-    let chart_mode = reader.read_u32() as i64;
-    let select = reader.read_bool1();
-    let visible = reader.read_bool1();
-    let session_deals = reader.read_i64();
-    let session_buy_orders = reader.read_i64();
-    let session_sell_orders = reader.read_i64();
-    let volume = reader.read_i64();
-    let volume_high = reader.read_i64();
-    let volume_low = reader.read_i64();
-    let time = reader.read_i64();
-    let digits = reader.read_u32() as i64;
-    let spread = reader.read_u32() as i64;
-    let spread_float = reader.read_bool1();
-    let ticks_book_depth = reader.read_u32() as i64;
-    let trade_calc_mode = reader.read_u32() as i64;
-    let trade_mode = reader.read_u32() as i64;
-    let start_time = reader.read_i64();
-    let expiration_time = reader.read_i64();
-    let trade_stops_level = reader.read_u32() as i64;
-    let trade_freeze_level = reader.read_u32() as i64;
-    let trade_exe_mode = reader.read_u32() as i64;
-    let swap_mode = reader.read_u32() as i64;
-    let swap_rollover3days = reader.read_u32() as i64;
-    let margin_hedged_use_leg = reader.read_bool1();
-    let expiration_mode = reader.read_u32() as i64;
-    let filling_mode = reader.read_u32() as i64;
-    let order_mode = reader.read_u32() as i64;
-    let order_gtc_mode = reader.read_u32() as i64;
-    let option_mode = reader.read_u32() as i64;
-    let option_right = reader.read_u32() as i64;
-    let bid = reader.read_f64();
-    let bid_high = reader.read_f64();
-    let bid_low = reader.read_f64();
-    let ask = reader.read_f64();
-    let ask_high = reader.read_f64();
-    let ask_low = reader.read_f64();
-    let last = reader.read_f64();
-    let last_high = reader.read_f64();
-    let last_low = reader.read_f64();
-    let volume_real = reader.read_f64();
-    let volume_high_real = reader.read_f64();
-    let volume_low_real = reader.read_f64();
-    let option_strike = reader.read_f64();
-    let point = reader.read_f64();
-    let trade_tick_value = reader.read_f64();
-    let trade_tick_value_profit = reader.read_f64();
-    let trade_tick_value_loss = reader.read_f64();
-    let trade_tick_size = reader.read_f64();
-    let trade_contract_size = reader.read_f64();
-    let trade_accrued_interest = reader.read_f64();
-    let trade_face_value = reader.read_f64();
-    let trade_liquidity_rate = reader.read_f64();
-    let volume_min = reader.read_f64();
-    let volume_max = reader.read_f64();
-    let volume_step = reader.read_f64();
-    let volume_limit = reader.read_f64();
-    let swap_long = reader.read_f64();
-    let swap_short = reader.read_f64();
-    let margin_initial = reader.read_f64();
-    let margin_maintenance = reader.read_f64();
-    let session_volume = reader.read_f64();
-    let session_turnover = reader.read_f64();
-    let session_interest = reader.read_f64();
-    let session_buy_orders_volume = reader.read_f64();
-    let session_sell_orders_volume = reader.read_f64();
-    let session_open = reader.read_f64();
-    let session_close = reader.read_f64();
-    let session_aw = reader.read_f64();
-    let session_price_settlement = reader.read_f64();
-    let session_price_limit_min = reader.read_f64();
-    let session_price_limit_max = reader.read_f64();
-    let margin_hedged = reader.read_f64();
-    let price_change = reader.read_f64();
-    let price_volatility = reader.read_f64();
-    let price_theoretical = reader.read_f64();
-    let price_greeks_delta = reader.read_f64();
-    let price_greeks_theta = reader.read_f64();
-    let price_greeks_gamma = reader.read_f64();
-    let price_greeks_vega = reader.read_f64();
-    let price_greeks_rho = reader.read_f64();
-    let price_greeks_omega = reader.read_f64();
-    let price_sensitivity = reader.read_f64();
+        // 严格按照 go-mt5 decodeSymbolInfo 的字段顺序和类型解析
+        // 参考：https://github.com/Mukbeast4/go-mt5/blob/main/symbols.go
+        let custom = reader.read_bool1();
+        let chart_mode = reader.read_u32() as i64;
+        let select = reader.read_bool1();
+        let visible = reader.read_bool1();
+        let session_deals = reader.read_i64();
+        let session_buy_orders = reader.read_i64();
+        let session_sell_orders = reader.read_i64();
+        let volume = reader.read_i64();
+        let volume_high = reader.read_i64();
+        let volume_low = reader.read_i64();
+        let time = reader.read_i64();
+        let digits = reader.read_u32() as i64;
+        let spread = reader.read_u32() as i64;
+        let spread_float = reader.read_bool1();
+        let ticks_book_depth = reader.read_u32() as i64;
+        let trade_calc_mode = reader.read_u32() as i64;
+        let trade_mode = reader.read_u32() as i64;
+        let start_time = reader.read_i64();
+        let expiration_time = reader.read_i64();
+        let trade_stops_level = reader.read_u32() as i64;
+        let trade_freeze_level = reader.read_u32() as i64;
+        let trade_exe_mode = reader.read_u32() as i64;
+        let swap_mode = reader.read_u32() as i64;
+        let swap_rollover3days = reader.read_u32() as i64;
+        let margin_hedged_use_leg = reader.read_bool1();
+        let expiration_mode = reader.read_u32() as i64;
+        let filling_mode = reader.read_u32() as i64;
+        let order_mode = reader.read_u32() as i64;
+        let order_gtc_mode = reader.read_u32() as i64;
+        let option_mode = reader.read_u32() as i64;
+        let option_right = reader.read_u32() as i64;
+        let bid = reader.read_f64();
+        let bid_high = reader.read_f64();
+        let bid_low = reader.read_f64();
+        let ask = reader.read_f64();
+        let ask_high = reader.read_f64();
+        let ask_low = reader.read_f64();
+        let last = reader.read_f64();
+        let last_high = reader.read_f64();
+        let last_low = reader.read_f64();
+        let volume_real = reader.read_f64();
+        let volume_high_real = reader.read_f64();
+        let volume_low_real = reader.read_f64();
+        let option_strike = reader.read_f64();
+        let point = reader.read_f64();
+        let trade_tick_value = reader.read_f64();
+        let trade_tick_value_profit = reader.read_f64();
+        let trade_tick_value_loss = reader.read_f64();
+        let trade_tick_size = reader.read_f64();
+        let trade_contract_size = reader.read_f64();
+        let trade_accrued_interest = reader.read_f64();
+        let trade_face_value = reader.read_f64();
+        let trade_liquidity_rate = reader.read_f64();
+        let volume_min = reader.read_f64();
+        let volume_max = reader.read_f64();
+        let volume_step = reader.read_f64();
+        let volume_limit = reader.read_f64();
+        let swap_long = reader.read_f64();
+        let swap_short = reader.read_f64();
+        let margin_initial = reader.read_f64();
+        let margin_maintenance = reader.read_f64();
+        let session_volume = reader.read_f64();
+        let session_turnover = reader.read_f64();
+        let session_interest = reader.read_f64();
+        let session_buy_orders_volume = reader.read_f64();
+        let session_sell_orders_volume = reader.read_f64();
+        let session_open = reader.read_f64();
+        let session_close = reader.read_f64();
+        let session_aw = reader.read_f64();
+        let session_price_settlement = reader.read_f64();
+        let session_price_limit_min = reader.read_f64();
+        let session_price_limit_max = reader.read_f64();
+        let margin_hedged = reader.read_f64();
+        let price_change = reader.read_f64();
+        let price_volatility = reader.read_f64();
+        let price_theoretical = reader.read_f64();
+        let price_greeks_delta = reader.read_f64();
+        let price_greeks_theta = reader.read_f64();
+        let price_greeks_gamma = reader.read_f64();
+        let price_greeks_vega = reader.read_f64();
+        let price_greeks_rho = reader.read_f64();
+        let price_greeks_omega = reader.read_f64();
+        let price_sensitivity = reader.read_f64();
 
-    // 字符串字段：固定宽度 UTF-16LE 槽（go-mt5 PR#3 验证）
-    // 总字符串区域 = 2432 字节
-    let basis = reader.read_fixed_string(64);
-    let category = reader.read_fixed_string(128);
-    let currency_base = reader.read_fixed_string(32);
-    let currency_profit = reader.read_fixed_string(32);
-    let currency_margin = reader.read_fixed_string(32);
-    let bank = reader.read_fixed_string(512);
-    let description = reader.read_fixed_string(64);
-    let exchange = reader.read_fixed_string(64);
-    let formula = reader.read_fixed_string(1024);
-    let isin = reader.read_fixed_string(32);
-    let page = reader.read_fixed_string(128);
-    let path = reader.read_fixed_string(256);
-    let symbol_name = reader.read_fixed_string(64);
+        // 字符串字段：固定宽度 UTF-16LE 槽（go-mt5 PR#3 验证）
+        // 总字符串区域 = 2432 字节
+        let basis = reader.read_fixed_string(64);
+        let category = reader.read_fixed_string(128);
+        let currency_base = reader.read_fixed_string(32);
+        let currency_profit = reader.read_fixed_string(32);
+        let currency_margin = reader.read_fixed_string(32);
+        let bank = reader.read_fixed_string(512);
+        let description = reader.read_fixed_string(64);
+        let exchange = reader.read_fixed_string(64);
+        let formula = reader.read_fixed_string(1024);
+        let isin = reader.read_fixed_string(32);
+        let page = reader.read_fixed_string(128);
+        let path = reader.read_fixed_string(256);
+        let symbol_name = reader.read_fixed_string(64);
 
-    if reader.has_error() {
-        return Err(Mt5Error::InvalidResponse("Failed to read symbol info".into()));
+        if reader.has_error() {
+            return Err(Mt5Error::InvalidResponse(
+                "Failed to read symbol info".into(),
+            ));
+        }
+
+        Ok(SymbolInfo {
+            custom,
+            chart_mode,
+            select,
+            visible,
+            session_deals,
+            session_buy_orders,
+            session_sell_orders,
+            volume,
+            volume_high,
+            volume_low,
+            time,
+            digits,
+            spread,
+            spread_float,
+            ticks_book_depth,
+            trade_calc_mode,
+            trade_mode,
+            start_time,
+            expiration_time,
+            trade_stops_level,
+            trade_freeze_level,
+            trade_exe_mode,
+            swap_mode,
+            swap_rollover3days,
+            margin_hedged_use_leg,
+            expiration_mode,
+            filling_mode,
+            order_mode,
+            order_gtc_mode,
+            option_mode,
+            option_right,
+            bid,
+            bidhigh: bid_high,
+            bidlow: bid_low,
+            ask,
+            askhigh: ask_high,
+            asklow: ask_low,
+            last,
+            lasthigh: last_high,
+            lastlow: last_low,
+            volume_real,
+            volumehigh_real: volume_high_real,
+            volumelow_real: volume_low_real,
+            option_strike,
+            point,
+            trade_tick_value,
+            trade_tick_value_profit,
+            trade_tick_value_loss,
+            trade_tick_size,
+            trade_contract_size,
+            trade_accrued_interest,
+            trade_face_value,
+            trade_liquidity_rate,
+            volume_min,
+            volume_max,
+            volume_step,
+            volume_limit,
+            swap_long,
+            swap_short,
+            margin_initial,
+            margin_maintenance,
+            session_volume,
+            session_turnover,
+            session_interest,
+            session_buy_orders_volume,
+            session_sell_orders_volume,
+            session_open,
+            session_close,
+            session_aw,
+            session_price_settlement,
+            session_price_limit_min,
+            session_price_limit_max,
+            margin_hedged,
+            price_change,
+            price_volatility,
+            price_theoretical,
+            price_greeks_delta,
+            price_greeks_theta,
+            price_greeks_gamma,
+            price_greeks_vega,
+            price_greeks_rho,
+            price_greeks_omega,
+            price_sensitivity,
+            basis,
+            category,
+            currency_base,
+            currency_profit,
+            currency_margin,
+            bank,
+            description,
+            exchange,
+            formula,
+            isin,
+            name: symbol_name,
+            page,
+            path,
+        })
     }
-
-    Ok(SymbolInfo {
-        custom,
-        chart_mode,
-        select,
-        visible,
-        session_deals,
-        session_buy_orders,
-        session_sell_orders,
-        volume,
-        volume_high,
-        volume_low,
-        time,
-        digits,
-        spread,
-        spread_float,
-        ticks_book_depth,
-        trade_calc_mode,
-        trade_mode,
-        start_time,
-        expiration_time,
-        trade_stops_level,
-        trade_freeze_level,
-        trade_exe_mode,
-        swap_mode,
-        swap_rollover3days,
-        margin_hedged_use_leg,
-        expiration_mode,
-        filling_mode,
-        order_mode,
-        order_gtc_mode,
-        option_mode,
-        option_right,
-        bid,
-        bidhigh: bid_high,
-        bidlow: bid_low,
-        ask,
-        askhigh: ask_high,
-        asklow: ask_low,
-        last,
-        lasthigh: last_high,
-        lastlow: last_low,
-        volume_real,
-        volumehigh_real: volume_high_real,
-        volumelow_real: volume_low_real,
-        option_strike,
-        point,
-        trade_tick_value,
-        trade_tick_value_profit,
-        trade_tick_value_loss,
-        trade_tick_size,
-        trade_contract_size,
-        trade_accrued_interest,
-        trade_face_value,
-        trade_liquidity_rate,
-        volume_min,
-        volume_max,
-        volume_step,
-        volume_limit,
-        swap_long,
-        swap_short,
-        margin_initial,
-        margin_maintenance,
-        session_volume,
-        session_turnover,
-        session_interest,
-        session_buy_orders_volume,
-        session_sell_orders_volume,
-        session_open,
-        session_close,
-        session_aw,
-        session_price_settlement,
-        session_price_limit_min,
-        session_price_limit_max,
-        margin_hedged,
-        price_change,
-        price_volatility,
-        price_theoretical,
-        price_greeks_delta,
-        price_greeks_theta,
-        price_greeks_gamma,
-        price_greeks_vega,
-        price_greeks_rho,
-        price_greeks_omega,
-        price_sensitivity,
-        basis,
-        category,
-        currency_base,
-        currency_profit,
-        currency_margin,
-        bank,
-        description,
-        exchange,
-        formula,
-        isin,
-        name: symbol_name,
-        page,
-        path,
-    })
-}
 
     pub fn symbol_info(&self, symbol: &str) -> Result<Option<SymbolInfo>> {
         let pipe = self.pipe()?;
         let mut data = Vec::new();
         data.extend_from_slice(&encode_string(symbol));
-        
+
         let resp = pipe.send(170, &data)?;
-        
+
         if resp.is_empty() {
             return Ok(None);
         }
@@ -540,9 +543,9 @@ impl Mt5Client {
         let pipe = self.pipe()?;
         let mut data = Vec::new();
         data.extend_from_slice(&encode_string(symbol));
-        
+
         let resp = pipe.send(172, &data)?;
-        
+
         if resp.is_empty() {
             return Ok(None);
         }
@@ -580,14 +583,14 @@ impl Mt5Client {
         let mut data = Vec::new();
         data.extend_from_slice(&encode_string(symbol));
         data.push(if enable { 1u8 } else { 0u8 });
-        
+
         let resp = pipe.send(171, &data)?;
-        
+
         // 空响应表示成功（MT5只返回8字节的头部，没有额外数据）
         if resp.is_empty() {
             return Ok(true);
         }
-        
+
         if resp.len() < 4 {
             return Err(Mt5Error::InvalidResponse("Response too short".into()));
         }
@@ -651,7 +654,13 @@ impl Mt5Client {
         pipe.send(cmd, data)
     }
 
-    pub fn copy_rates_from_pos(&self, symbol: &str, timeframe: i32, start_pos: i64, count: i32) -> Result<Vec<Rate>> {
+    pub fn copy_rates_from_pos(
+        &self,
+        symbol: &str,
+        timeframe: i32,
+        start_pos: i64,
+        count: i32,
+    ) -> Result<Vec<Rate>> {
         let pipe = self.pipe()?;
         // 根据go-mt5源码，命令代码108，参数使用u32编码
         let cmd = 108;
@@ -666,7 +675,13 @@ impl Mt5Client {
         parse_rates_response(&resp)
     }
 
-    pub fn copy_rates_from(&self, symbol: &str, timeframe: i32, date_from: i64, count: i32) -> Result<Vec<Rate>> {
+    pub fn copy_rates_from(
+        &self,
+        symbol: &str,
+        timeframe: i32,
+        date_from: i64,
+        count: i32,
+    ) -> Result<Vec<Rate>> {
         let pipe = self.pipe()?;
         let cmd = 106;
 
@@ -680,7 +695,13 @@ impl Mt5Client {
         parse_rates_response(&resp)
     }
 
-    pub fn copy_rates_range(&self, symbol: &str, timeframe: i32, date_from: i64, date_to: i64) -> Result<Vec<Rate>> {
+    pub fn copy_rates_range(
+        &self,
+        symbol: &str,
+        timeframe: i32,
+        date_from: i64,
+        date_to: i64,
+    ) -> Result<Vec<Rate>> {
         let pipe = self.pipe()?;
         let cmd = 107;
 
@@ -694,7 +715,13 @@ impl Mt5Client {
         parse_rates_response(&resp)
     }
 
-    pub fn copy_ticks_from(&self, symbol: &str, from: i64, count: i32, flags: i32) -> Result<Vec<Tick>> {
+    pub fn copy_ticks_from(
+        &self,
+        symbol: &str,
+        from: i64,
+        count: i32,
+        flags: i32,
+    ) -> Result<Vec<Tick>> {
         let pipe = self.pipe()?;
         let cmd = 104;
 
@@ -708,7 +735,13 @@ impl Mt5Client {
         parse_ticks_response(&resp)
     }
 
-    pub fn copy_ticks_range(&self, symbol: &str, from: i64, to: i64, flags: i32) -> Result<Vec<Tick>> {
+    pub fn copy_ticks_range(
+        &self,
+        symbol: &str,
+        from: i64,
+        to: i64,
+        flags: i32,
+    ) -> Result<Vec<Tick>> {
         let pipe = self.pipe()?;
         let cmd = 105;
 
@@ -786,11 +819,11 @@ impl Mt5Client {
 
         let data = encode_string(symbol);
         let resp = pipe.send(cmd, &data)?;
-        
+
         if resp.is_empty() {
             return Ok(true);
         }
-        
+
         if resp.len() < 4 {
             return Err(Mt5Error::InvalidResponse("Response too short".into()));
         }
@@ -814,11 +847,11 @@ impl Mt5Client {
 
         let data = encode_string(symbol);
         let resp = pipe.send(cmd, &data)?;
-        
+
         if resp.is_empty() {
             return Ok(true);
         }
-        
+
         if resp.len() < 4 {
             return Err(Mt5Error::InvalidResponse("Response too short".into()));
         }
@@ -837,13 +870,19 @@ impl Mt5Client {
     ///
     /// Note: this is an approximation. For the exact margin the terminal would
     /// reserve, use `order_check`, whose response includes the real margin.
-    pub fn order_calc_margin(&self, _action: i32, symbol: &str, volume: f64, price: f64) -> Result<f64> {
-        let symbol_info = self.symbol_info(symbol)?.ok_or_else(|| {
-            Mt5Error::CommandFailed {
+    pub fn order_calc_margin(
+        &self,
+        _action: i32,
+        symbol: &str,
+        volume: f64,
+        price: f64,
+    ) -> Result<f64> {
+        let symbol_info = self
+            .symbol_info(symbol)?
+            .ok_or_else(|| Mt5Error::CommandFailed {
                 cmd: 0,
                 error: format!("symbol not found: {symbol}"),
-            }
-        })?;
+            })?;
 
         if symbol_info.margin_initial > 0.0 {
             return Ok(volume * price * symbol_info.margin_initial / 4.0);
@@ -851,20 +890,31 @@ impl Mt5Client {
 
         // Broker tidak menyediakan margin_initial: fallback berbasis leverage.
         let account = self.account_info()?;
-        let leverage = if account.leverage > 0 { account.leverage as f64 } else { 100.0 };
+        let leverage = if account.leverage > 0 {
+            account.leverage as f64
+        } else {
+            100.0
+        };
         let margin = volume * price * symbol_info.trade_contract_size / leverage;
         Ok(margin)
     }
 
     /// Calculate expected profit for a trade (local calculation, no IPC).
     /// profit = volume × (price_close - price_open) × trade_contract_size
-    pub fn order_calc_profit(&self, _action: i32, symbol: &str, volume: f64, price_open: f64, price_close: f64) -> Result<f64> {
-        let symbol_info = self.symbol_info(symbol)?.ok_or_else(|| {
-            Mt5Error::CommandFailed {
+    pub fn order_calc_profit(
+        &self,
+        _action: i32,
+        symbol: &str,
+        volume: f64,
+        price_open: f64,
+        price_close: f64,
+    ) -> Result<f64> {
+        let symbol_info = self
+            .symbol_info(symbol)?
+            .ok_or_else(|| Mt5Error::CommandFailed {
                 cmd: 0,
                 error: format!("symbol not found: {symbol}"),
-            }
-        })?;
+            })?;
 
         let profit = volume * (price_close - price_open) * symbol_info.trade_contract_size;
         Ok(profit)
@@ -956,7 +1006,11 @@ fn encode_trade_request(request: &TradeRequest) -> Vec<u8> {
     w.extend_from_slice(&request.position.to_le_bytes());
     w.extend_from_slice(&request.position_by.to_le_bytes());
 
-    debug_assert_eq!(w.len(), TRADE_REQUEST_TOTAL, "trade request must be 232 bytes");
+    debug_assert_eq!(
+        w.len(),
+        TRADE_REQUEST_TOTAL,
+        "trade request must be 232 bytes"
+    );
     w
 }
 
@@ -1511,7 +1565,7 @@ fn read_string_at_offset(data: &[u8], offset: usize) -> String {
     if offset >= data.len() {
         return String::new();
     }
-    
+
     let mut chars = Vec::new();
     let mut pos = offset;
     while pos + 1 < data.len() {
@@ -1567,20 +1621,48 @@ mod tests {
         };
         let data = encode_trade_request(&req);
         assert_eq!(data.len(), 232, "request must be 232 bytes");
-        assert_eq!(u32::from_le_bytes(data[0..4].try_into().unwrap()), 1, "action @0");
+        assert_eq!(
+            u32::from_le_bytes(data[0..4].try_into().unwrap()),
+            1,
+            "action @0"
+        );
         assert_eq!(utf16_slot(&data[20..84]), "EURUSD", "symbol slot @20");
         assert_eq!(
             f64::from_le_bytes(data[84..92].try_into().unwrap()),
             0.01,
             "volume @84"
         );
-        assert_eq!(u64::from_le_bytes(data[124..132].try_into().unwrap()), 20, "deviation @124");
-        assert_eq!(u32::from_le_bytes(data[132..136].try_into().unwrap()), 0, "type @132");
-        assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 1, "filling @136");
-        assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 0, "time @140");
+        assert_eq!(
+            u64::from_le_bytes(data[124..132].try_into().unwrap()),
+            20,
+            "deviation @124"
+        );
+        assert_eq!(
+            u32::from_le_bytes(data[132..136].try_into().unwrap()),
+            0,
+            "type @132"
+        );
+        assert_eq!(
+            u32::from_le_bytes(data[136..140].try_into().unwrap()),
+            1,
+            "filling @136"
+        );
+        assert_eq!(
+            u32::from_le_bytes(data[140..144].try_into().unwrap()),
+            0,
+            "time @140"
+        );
         assert_eq!(utf16_slot(&data[152..216]), "t", "comment slot @152");
-        assert_eq!(i64::from_le_bytes(data[216..224].try_into().unwrap()), 0, "position @216");
-        assert_eq!(i64::from_le_bytes(data[224..232].try_into().unwrap()), 0, "position_by @224");
+        assert_eq!(
+            i64::from_le_bytes(data[216..224].try_into().unwrap()),
+            0,
+            "position @216"
+        );
+        assert_eq!(
+            i64::from_le_bytes(data[224..232].try_into().unwrap()),
+            0,
+            "position_by @224"
+        );
     }
 
     #[test]
@@ -1627,11 +1709,20 @@ mod tests {
 
     #[test]
     fn trade_result_is_ok_matches_retcodes() {
-        let ok = TradeResult { retcode: retcodes::DONE, ..Default::default() };
+        let ok = TradeResult {
+            retcode: retcodes::DONE,
+            ..Default::default()
+        };
         assert!(ok.is_ok());
-        let placed = TradeResult { retcode: retcodes::PLACED, ..Default::default() };
+        let placed = TradeResult {
+            retcode: retcodes::PLACED,
+            ..Default::default()
+        };
         assert!(placed.is_ok());
-        let reject = TradeResult { retcode: retcodes::REJECT, ..Default::default() };
+        let reject = TradeResult {
+            retcode: retcodes::REJECT,
+            ..Default::default()
+        };
         assert!(!reject.is_ok());
     }
 }
