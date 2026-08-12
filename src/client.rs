@@ -842,21 +842,23 @@ impl Mt5Client {
         Ok(profit)
     }
 
-    // TODO: 未实现 - order_check
-    // Python: mt5.order_check(request)
-    // 功能：检查交易订单是否有效，返回检查结果
-    // 需要实现：构建TradeRequest结构，发送cmd到MT5，解析TradeCheckResult响应
-    // pub fn order_check(&self, request: &TradeRequest) -> Result<TradeCheckResult> {
-    //     unimplemented!()
-    // }
+    /// Check whether a trade request is valid without placing it (Python `mt5.order_check`).
+    /// Wire format verified against the real terminal (build 6090) and go-mt5 fixtures.
+    pub fn order_check(&self, request: &TradeRequest) -> Result<TradeCheckResult> {
+        let pipe = self.pipe()?;
+        let data = encode_trade_request(request);
+        let resp = pipe.send(CMD_ORDER_CHECK, &data)?;
+        decode_check_result(&resp)
+    }
 
-    // TODO: 未实现 - order_send
-    // Python: mt5.order_send(request)
-    // 功能：发送交易订单到MT5终端执行
-    // 需要实现：构建TradeRequest结构，发送cmd到MT5，解析TradeResult响应
-    // pub fn order_send(&self, request: &TradeRequest) -> Result<TradeResult> {
-    //     unimplemented!()
-    // }
+    /// Send a trade request to the terminal for execution (Python `mt5.order_send`).
+    /// Same request encoding as `order_check`; decodes the 260-byte trade result.
+    pub fn order_send(&self, request: &TradeRequest) -> Result<TradeResult> {
+        let pipe = self.pipe()?;
+        let data = encode_trade_request(request);
+        let resp = pipe.send(CMD_ORDER_SEND, &data)?;
+        decode_trade_result(&resp)
+    }
 
     pub fn last_error(&self) -> Result<(i32, String)> {
         let pipe = self.pipe()?;
@@ -873,6 +875,139 @@ impl Mt5Client {
 
         Ok((code, message))
     }
+}
+
+const CMD_ORDER_CHECK: u32 = 160;
+const CMD_ORDER_SEND: u32 = 161;
+
+const TRADE_REQUEST_SYMBOL_SLOT: usize = 64;
+const TRADE_REQUEST_COMMENT_SLOT: usize = 64;
+const TRADE_REQUEST_TOTAL: usize = 232;
+
+const CHECK_RESULT_COMMENT_SLOT: usize = 200;
+const CHECK_RESULT_TOTAL: usize = 252;
+
+const TRADE_RESULT_COMMENT_SLOT: usize = 200;
+const TRADE_RESULT_TOTAL: usize = 260;
+
+fn encode_fixed_string(slot: &mut [u8], s: &str) {
+    for (i, c) in s.encode_utf16().enumerate() {
+        if i * 2 + 1 < slot.len() {
+            slot[i * 2] = c.to_le_bytes()[0];
+            slot[i * 2 + 1] = c.to_le_bytes()[1];
+        }
+    }
+}
+
+/// Encode a TradeRequest to the exact 232-byte wire layout used by the official
+/// Python MetaTrader5 library (offsets verified by go-mt5 tests):
+///   action(4) magic(8) order(8) symbol(64) volume(8) price(8) stoplimit(8)
+///   sl(8) tp(8) deviation(8) type(4) filling(4) time(4) expiration(8)
+///   comment(64) position(8) position_by(8)
+fn encode_trade_request(request: &TradeRequest) -> Vec<u8> {
+    let mut w = Vec::with_capacity(TRADE_REQUEST_TOTAL);
+    w.extend_from_slice(&(request.action as u32).to_le_bytes());
+    w.extend_from_slice(&request.magic.to_le_bytes());
+    w.extend_from_slice(&request.order.to_le_bytes());
+    let mut sym = vec![0u8; TRADE_REQUEST_SYMBOL_SLOT];
+    encode_fixed_string(&mut sym, &request.symbol);
+    w.extend_from_slice(&sym);
+    w.extend_from_slice(&request.volume.to_le_bytes());
+    w.extend_from_slice(&request.price.to_le_bytes());
+    w.extend_from_slice(&request.stoplimit.to_le_bytes());
+    w.extend_from_slice(&request.sl.to_le_bytes());
+    w.extend_from_slice(&request.tp.to_le_bytes());
+    w.extend_from_slice(&request.deviation.to_le_bytes());
+    w.extend_from_slice(&(request.r#type as u32).to_le_bytes());
+    w.extend_from_slice(&(request.type_filling as u32).to_le_bytes());
+    w.extend_from_slice(&(request.type_time as u32).to_le_bytes());
+    w.extend_from_slice(&request.expiration.to_le_bytes());
+    let mut cmt = vec![0u8; TRADE_REQUEST_COMMENT_SLOT];
+    encode_fixed_string(&mut cmt, &request.comment);
+    w.extend_from_slice(&cmt);
+    w.extend_from_slice(&request.position.to_le_bytes());
+    w.extend_from_slice(&request.position_by.to_le_bytes());
+
+    debug_assert_eq!(w.len(), TRADE_REQUEST_TOTAL, "trade request must be 232 bytes");
+    w
+}
+
+fn decode_fixed_string(data: &[u8], start: usize, slot_bytes: usize) -> Result<String> {
+    if start + slot_bytes > data.len() {
+        return Err(Mt5Error::InvalidResponse(format!(
+            "string slot out of bounds: start={start} slot={slot_bytes} len={}",
+            data.len()
+        )));
+    }
+    let mut chars = Vec::with_capacity(slot_bytes / 2);
+    let mut i = start;
+    while i + 1 < start + slot_bytes {
+        let c = u16::from_le_bytes([data[i], data[i + 1]]);
+        if c == 0 {
+            break;
+        }
+        chars.push(c);
+        i += 2;
+    }
+    Ok(String::from_utf16_lossy(&chars))
+}
+
+/// Decode the 252-byte order_check response:
+///   retcode(4) balance(8) equity(8) profit(8) margin(8) margin_free(8)
+///   margin_level(8) comment(200)
+fn decode_check_result(data: &[u8]) -> Result<TradeCheckResult> {
+    if data.len() < CHECK_RESULT_TOTAL {
+        return Err(Mt5Error::InvalidResponse(format!(
+            "check result too short: {} bytes (want {})",
+            data.len(),
+            CHECK_RESULT_TOTAL
+        )));
+    }
+    let read_f64 = |off: usize| f64::from_le_bytes(data[off..off + 8].try_into().unwrap());
+    let retcode = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let comment = decode_fixed_string(data, 52, CHECK_RESULT_COMMENT_SLOT)?;
+    Ok(TradeCheckResult {
+        retcode,
+        balance: read_f64(4),
+        equity: read_f64(12),
+        profit: read_f64(20),
+        margin: read_f64(28),
+        margin_free: read_f64(36),
+        margin_level: read_f64(44),
+        comment,
+    })
+}
+
+/// Decode the 260-byte order_send response:
+///   retcode(4) deal(8) order(8) volume(8) price(8) bid(8) ask(8)
+///   comment(200) request_id(4) retcode_ext(4)
+fn decode_trade_result(data: &[u8]) -> Result<TradeResult> {
+    if data.len() < TRADE_RESULT_TOTAL {
+        return Err(Mt5Error::InvalidResponse(format!(
+            "trade result too short: {} bytes (want {})",
+            data.len(),
+            TRADE_RESULT_TOTAL
+        )));
+    }
+    let read_f64 = |off: usize| f64::from_le_bytes(data[off..off + 8].try_into().unwrap());
+    let retcode = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let deal = i64::from_le_bytes(data[4..12].try_into().unwrap());
+    let order = i64::from_le_bytes(data[12..20].try_into().unwrap());
+    let comment = decode_fixed_string(data, 52, TRADE_RESULT_COMMENT_SLOT)?;
+    let request_id = u32::from_le_bytes(data[252..256].try_into().unwrap());
+    let retcode_ext = i32::from_le_bytes(data[256..260].try_into().unwrap());
+    Ok(TradeResult {
+        retcode,
+        deal,
+        order,
+        volume: read_f64(20),
+        price: read_f64(28),
+        bid: read_f64(36),
+        ask: read_f64(44),
+        comment,
+        request_id,
+        retcode_ext,
+    })
 }
 
 fn parse_positions_response(data: &[u8]) -> Result<Vec<TradePosition>> {
@@ -1345,6 +1480,117 @@ impl<'a> Reader<'a> {
         }
         self.pos = end;
         String::from_utf16_lossy(&chars)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn utf16_slot(slot: &[u8]) -> String {
+        let mut chars = Vec::new();
+        let mut i = 0;
+        while i + 1 < slot.len() {
+            let c = u16::from_le_bytes([slot[i], slot[i + 1]]);
+            if c == 0 {
+                break;
+            }
+            chars.push(c);
+            i += 2;
+        }
+        String::from_utf16_lossy(&chars)
+    }
+
+    #[test]
+    fn encode_trade_request_byte_positions() {
+        // Mirror of go-mt5 TestOrderSendEncodesPackedRequest offsets.
+        let req = TradeRequest {
+            action: TradeAction::Deal,
+            magic: 0,
+            order: 0,
+            symbol: "EURUSD".into(),
+            volume: 0.01,
+            price: 0.0,
+            stoplimit: 0.0,
+            sl: 0.0,
+            tp: 0.0,
+            deviation: 20,
+            r#type: OrderType::Buy,
+            type_filling: OrderFilling::IOC,
+            type_time: OrderTime::GTC,
+            expiration: 0,
+            comment: "t".into(),
+            position: 0,
+            position_by: 0,
+        };
+        let data = encode_trade_request(&req);
+        assert_eq!(data.len(), 232, "request must be 232 bytes");
+        assert_eq!(u32::from_le_bytes(data[0..4].try_into().unwrap()), 1, "action @0");
+        assert_eq!(utf16_slot(&data[20..84]), "EURUSD", "symbol slot @20");
+        assert_eq!(
+            f64::from_le_bytes(data[84..92].try_into().unwrap()),
+            0.01,
+            "volume @84"
+        );
+        assert_eq!(u64::from_le_bytes(data[124..132].try_into().unwrap()), 20, "deviation @124");
+        assert_eq!(u32::from_le_bytes(data[132..136].try_into().unwrap()), 0, "type @132");
+        assert_eq!(u32::from_le_bytes(data[136..140].try_into().unwrap()), 1, "filling @136");
+        assert_eq!(u32::from_le_bytes(data[140..144].try_into().unwrap()), 0, "time @140");
+        assert_eq!(utf16_slot(&data[152..216]), "t", "comment slot @152");
+        assert_eq!(i64::from_le_bytes(data[216..224].try_into().unwrap()), 0, "position @216");
+        assert_eq!(i64::from_le_bytes(data[224..232].try_into().unwrap()), 0, "position_by @224");
+    }
+
+    #[test]
+    fn decode_check_result_fixture() {
+        // Captured from a real terminal; expected values from go-mt5 TestOrderCheckDecodesPackedResponse.
+        let fixture = include_bytes!("../testdata/order_check_done.bin");
+        assert_eq!(fixture.len(), 252);
+        let res = decode_check_result(fixture).unwrap();
+        assert_eq!(res.retcode, 0);
+        assert_eq!(res.balance, 103000.0);
+        assert_eq!(res.equity, 103000.0);
+        assert_eq!(res.profit, 0.0);
+        assert_eq!(res.margin, 2.0);
+        assert_eq!(res.margin_free, 102998.0);
+        assert_eq!(res.margin_level, 5150000.0);
+        assert_eq!(res.comment, "Done");
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn decode_trade_result_fixture() {
+        // Expected values from go-mt5 TestOrderSendDecodesPackedResponse.
+        let fixture = include_bytes!("../testdata/order_send_done.bin");
+        assert_eq!(fixture.len(), 260);
+        let res = decode_trade_result(fixture).unwrap();
+        assert_eq!(res.retcode, 10009);
+        assert_eq!(res.deal, 18785220);
+        assert_eq!(res.order, 27822128);
+        assert_eq!(res.volume, 0.01);
+        assert!((res.price - 1.16218).abs() < 1e-9);
+        assert!((res.bid - 1.16213).abs() < 1e-9);
+        assert!((res.ask - 1.16218).abs() < 1e-9);
+        assert_eq!(res.comment, "Request executed");
+        assert_eq!(res.request_id, 2316072679);
+        assert_eq!(res.retcode_ext, 0);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn decode_trade_result_too_short() {
+        assert!(decode_trade_result(&[0u8; 100]).is_err());
+        assert!(decode_check_result(&[0u8; 100]).is_err());
+    }
+
+    #[test]
+    fn trade_result_is_ok_matches_retcodes() {
+        let ok = TradeResult { retcode: retcodes::DONE, ..Default::default() };
+        assert!(ok.is_ok());
+        let placed = TradeResult { retcode: retcodes::PLACED, ..Default::default() };
+        assert!(placed.is_ok());
+        let reject = TradeResult { retcode: retcodes::REJECT, ..Default::default() };
+        assert!(!reject.is_ok());
     }
 }
 
