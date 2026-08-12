@@ -683,13 +683,21 @@ impl Mt5Client {
         parse_rates_response(&resp)
     }
 
-    pub fn copy_ticks_from(&self, symbol: &str, from: i64, count: i32, flags: i32) -> Result<Vec<Tick>> {
+    /// Copy ticks starting from a date (Python `mt5.copy_ticks_from`).
+    ///
+    /// `date_from` is in **seconds** (like the Python API and `copy_rates_*`),
+    /// but the MT5 IPC protocol expects **milliseconds** for tick dates — verified
+    /// live against build 6090: sending seconds made the terminal return the
+    /// oldest ticks in history (date parsed as ~1970); sending ms returns the
+    /// correct window. The official Python DLL converts seconds→ms internally;
+    /// go-mt5 did not, which is why mt5-rs inherited the bug.
+    pub fn copy_ticks_from(&self, symbol: &str, date_from: i64, count: i32, flags: i32) -> Result<Vec<Tick>> {
         let pipe = self.pipe()?;
         let cmd = 104;
 
         let mut data = Vec::new();
         data.extend_from_slice(&encode_string(symbol));
-        data.extend_from_slice(&from.to_le_bytes());
+        data.extend_from_slice(&date_from.saturating_mul(1000).to_le_bytes());
         data.extend_from_slice(&(count as u32).to_le_bytes());
         data.extend_from_slice(&(flags as u32).to_le_bytes());
 
@@ -697,14 +705,18 @@ impl Mt5Client {
         parse_ticks_response(&resp)
     }
 
-    pub fn copy_ticks_range(&self, symbol: &str, from: i64, to: i64, flags: i32) -> Result<Vec<Tick>> {
+    /// Copy ticks within a date range (Python `mt5.copy_ticks_range`).
+    ///
+    /// Dates are in **seconds** and converted to **milliseconds** on the wire
+    /// (see `copy_ticks_from` — MT5 expects ms for tick dates).
+    pub fn copy_ticks_range(&self, symbol: &str, date_from: i64, date_to: i64, flags: i32) -> Result<Vec<Tick>> {
         let pipe = self.pipe()?;
         let cmd = 105;
 
         let mut data = Vec::new();
         data.extend_from_slice(&encode_string(symbol));
-        data.extend_from_slice(&from.to_le_bytes());
-        data.extend_from_slice(&to.to_le_bytes());
+        data.extend_from_slice(&date_from.saturating_mul(1000).to_le_bytes());
+        data.extend_from_slice(&date_to.saturating_mul(1000).to_le_bytes());
         data.extend_from_slice(&(flags as u32).to_le_bytes());
 
         let resp = pipe.send(cmd, &data)?;
