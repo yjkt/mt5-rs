@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt + clippy + test (stable)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run unit tests
+        run: cargo test --locked
+
+      # Coverage gate: every public function must be exercised by a test
+      # (fixture decode or mock-pipe round-trip). The threshold is deliberately
+      # conservative; raise it as more commands get covered.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage gate
+        run: cargo llvm-cov --fail-under-lines 75
+
+      - name: Release build
+        run: cargo build --release --locked
+
+  msrv:
+    name: MSRV check (1.71)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@1.71.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cargo.lock is pinned to format v3 (generated with cargo 1.71), so
+      # both the MSRV job and the stable job build the exact same dependency
+      # set. This keeps MSRV builds reproducible instead of drifting with
+      # whatever is latest on crates.io.
+      - name: MSRV check
+        run: cargo check --locked

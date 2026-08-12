@@ -1,21 +1,38 @@
+use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL,
-    OPEN_EXISTING,
+    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING,
+};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS, PROCESSENTRY32W,
-};
-use sha2::{Sha256, Digest};
 
 use crate::error::{Mt5Error, Result};
 
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
+/// Transport abstraction over the MT5 IPC pipe.
+///
+/// `NamedPipeClient` is the real Windows implementation; tests can inject an
+/// in-memory mock to exercise the full request/response flow without a
+/// running terminal (mirrors go-mt5's mock pipe).
+pub trait Transport: Send {
+    /// Send a command with its payload and return the response data
+    /// (after the 8-byte cmd_echo + success header).
+    fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>>;
+}
+
 pub struct NamedPipeClient {
     handle: HANDLE,
+    // Set when the pipe handle is no longer usable (e.g. the terminal closed
+    // it after an unsupported command). Subsequent calls fail fast with a
+    // clear error instead of reusing a dead handle; the caller must create a
+    // new client (re-initialize). Interior mutability so existing &self API
+    // keeps working.
+    broken: Cell<bool>,
 }
 
 impl NamedPipeClient {
@@ -29,10 +46,7 @@ impl NamedPipeClient {
             }
         };
 
-        let pipe_name_wide: Vec<u16> = name
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+        let pipe_name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
             WaitNamedPipeW(pipe_name_wide.as_ptr(), 500);
@@ -57,10 +71,29 @@ impl NamedPipeClient {
             )));
         }
 
-        Ok(Self { handle })
+        Ok(Self {
+            handle,
+            broken: Cell::new(false),
+        })
+    }
+
+    fn mark_broken(&self, err: Mt5Error) -> Mt5Error {
+        if !self.broken.get() {
+            self.broken.set(true);
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+        err
     }
 
     pub fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>> {
+        if self.broken.get() {
+            return Err(Mt5Error::ConnectionFailed(
+                "Pipe connection was closed by the terminal (broken pipe); re-initialize the client".into(),
+            ));
+        }
+
         let total_len = 4 + data.len();
         let mut request = Vec::with_capacity(8 + data.len());
         request.extend_from_slice(&(total_len as u32).to_le_bytes());
@@ -78,7 +111,7 @@ impl NamedPipeClient {
             );
 
             if result == 0 {
-                return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
             }
         }
 
@@ -99,7 +132,7 @@ impl NamedPipeClient {
             );
 
             if result == 0 {
-                return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
             }
         }
 
@@ -127,7 +160,9 @@ impl NamedPipeClient {
                 );
 
                 if result == 0 {
-                    return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                    return Err(
+                        self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error()))
+                    );
                 }
 
                 total_read += bytes_read as usize;
@@ -142,6 +177,12 @@ impl NamedPipeClient {
         } else {
             Ok(Vec::new())
         }
+    }
+}
+
+impl Transport for NamedPipeClient {
+    fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>> {
+        NamedPipeClient::send(self, cmd, data)
     }
 }
 
@@ -171,7 +212,10 @@ pub fn compute_pipe_name(terminal_path: &str) -> String {
     hasher.update(&buf);
     let result = hasher.finalize();
 
-    format!(r"\\.\pipe\MT5.Terminal.{}", hex::encode(result).to_uppercase())
+    format!(
+        r"\\.\pipe\MT5.Terminal.{}",
+        hex::encode(result).to_uppercase()
+    )
 }
 
 pub fn discover_mt5_pipe() -> String {
@@ -188,10 +232,7 @@ pub fn discover_mt5_pipe() -> String {
 }
 
 fn test_pipe_connection(pipe_name: &str) -> bool {
-    let pipe_name_wide: Vec<u16> = pipe_name
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let pipe_name_wide: Vec<u16> = pipe_name.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
         WaitNamedPipeW(pipe_name_wide.as_ptr(), 500);
@@ -265,7 +306,7 @@ fn find_terminal64_paths() -> Result<Vec<String>> {
 
 fn get_process_path(pid: u32) -> Result<String> {
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle == std::ptr::null_mut() {
+    if handle.is_null() {
         return Err(Mt5Error::ConnectionFailed(format!(
             "Failed to open process {}",
             pid

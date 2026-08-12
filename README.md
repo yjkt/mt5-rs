@@ -1,5 +1,7 @@
 # mt5-rs
 
+[![CI](https://github.com/nirvagold/mt5-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/nirvagold/mt5-rs/actions/workflows/ci.yml)
+
 A pure Rust library for MetaTrader 5 IPC communication. No Python dependency.
 
 Compatible with Python `MetaTrader5` library API.
@@ -8,8 +10,17 @@ Compatible with Python `MetaTrader5` library API.
 
 - Pure Rust implementation, no Python or C++ dependency
 - Windows named pipe IPC communication with MT5 terminal
-- Full compatibility with Python `MetaTrader5` library (30/32 functions)
+- Full compatibility with Python `MetaTrader5` library (32/32 functions)
 - Support MT5 Build 5836+
+
+## Testing
+
+- 30+ unit tests: byte-exact fixture decodes captured from real terminals and
+  mock-pipe round-trips that verify request encoding + response decoding for
+  every command, without needing MT5 running.
+- CI runs `fmt`, `clippy -D warnings`, tests, release build, an MSRV check, and
+  a coverage gate (`cargo llvm-cov --fail-under-lines 75`). The named-pipe
+  transport itself is exercised by live terminal tests (see `mt5-spike`).
 
 ## Quick Start
 
@@ -99,19 +110,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `market_book_get(symbol)` | Get market depth data |
 | `market_book_release(symbol)` | Unsubscribe from market depth |
 
-### Trading Calculations
+### Trading
 
 | Function | Description |
 |----------|-------------|
+| `order_check(&TradeRequest) -> TradeCheckResult` | Check whether a trade request is valid, without placing it |
+| `order_send(&TradeRequest) -> TradeResult` | Send a trade request to the terminal for execution |
 | `order_calc_margin(action, symbol, volume, price)` | Calculate required margin (local calculation) |
 | `order_calc_profit(action, symbol, volume, price_open, price_close)` | Calculate expected profit (local calculation) |
 
-### Not Implemented
+Trade request fields mirror the Python `mt5.TradeRequest` structure (`action`, `magic`, `order`, `symbol`, `volume`, `price`, `stoplimit`, `sl`, `tp`, `deviation`, `type`, `type_filling`, `type_time`, `expiration`, `comment`, `position`, `position_by`). Use `TradeRequest::new(action, symbol, volume, type)` to build a market order, then set `sl`/`tp`/`price`/`deviation` as needed. `TradeResult::is_ok()` / `TradeCheckResult::is_ok()` report whether the terminal accepted the request.
 
-| Function | Status |
-|----------|--------|
-| `order_check(request)` | TODO - Check trade request validity |
-| `order_send(request)` | TODO - Send trade request to MT5 |
+```rust
+use mt5_rs::{Mt5Client, discover_mt5_pipe, TradeRequest, TradeAction, OrderType, OrderFilling};
+
+let mut client = Mt5Client::new();
+client.initialize(Some(&discover_mt5_pipe()))?;
+
+let tick = client.symbol_info_tick("EURUSD")?.unwrap();
+let mut req = TradeRequest::new(TradeAction::Deal, "EURUSD", 0.01, OrderType::Buy);
+req.price = tick.ask;
+req.type_filling = OrderFilling::FOK;
+req.comment = "my bot".into();
+
+let result = client.order_send(&req)?;
+println!("retcode={} comment={}", result.retcode, result.comment);
+```
 
 ## Implementation Notes
 
