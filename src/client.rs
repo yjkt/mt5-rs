@@ -157,7 +157,7 @@ fn decode_account_info(data: &[u8]) -> Result<AccountInfo> {
     let margin = reader.read_f64();
 
     // Pos 75-82: margin_free (f64)
-    let free_margin = reader.read_f64();
+    let margin_free = reader.read_f64();
 
     // Pos 83-90: margin_level (f64)
     let margin_level = reader.read_f64();
@@ -219,7 +219,7 @@ fn decode_account_info(data: &[u8]) -> Result<AccountInfo> {
         profit,
         equity,
         margin,
-        free_margin,
+        margin_free,
         margin_level,
         margin_so_call,
         margin_so_so,
@@ -246,20 +246,20 @@ fn decode_symbol_info(reader: &mut Reader) -> Result<SymbolInfo> {
     let session_buy_orders = reader.read_i64();
     let session_sell_orders = reader.read_i64();
     let volume = reader.read_i64();
-    let volume_high = reader.read_i64();
-    let volume_low = reader.read_i64();
+    let volumehigh = reader.read_i64();
+    let volumelow = reader.read_i64();
     let time = reader.read_i64();
     let digits = reader.read_u32() as i64;
     let spread = reader.read_u32() as i64;
     let spread_float = reader.read_bool1();
-    let ticks_book_depth = reader.read_u32() as i64;
+    let ticks_bookdepth = reader.read_u32() as i64;
     let trade_calc_mode = reader.read_u32() as i64;
     let trade_mode = reader.read_u32() as i64;
     let start_time = reader.read_i64();
     let expiration_time = reader.read_i64();
     let trade_stops_level = reader.read_u32() as i64;
     let trade_freeze_level = reader.read_u32() as i64;
-    let trade_exe_mode = reader.read_u32() as i64;
+    let trade_exemode = reader.read_u32() as i64;
     let swap_mode = reader.read_u32() as i64;
     let swap_rollover3days = reader.read_u32() as i64;
     let margin_hedged_use_leg = reader.read_bool1();
@@ -279,8 +279,8 @@ fn decode_symbol_info(reader: &mut Reader) -> Result<SymbolInfo> {
     let last_high = reader.read_f64();
     let last_low = reader.read_f64();
     let volume_real = reader.read_f64();
-    let volume_high_real = reader.read_f64();
-    let volume_low_real = reader.read_f64();
+    let volumehigh_real = reader.read_f64();
+    let volumelow_real = reader.read_f64();
     let option_strike = reader.read_f64();
     let point = reader.read_f64();
     let trade_tick_value = reader.read_f64();
@@ -353,20 +353,20 @@ fn decode_symbol_info(reader: &mut Reader) -> Result<SymbolInfo> {
         session_buy_orders,
         session_sell_orders,
         volume,
-        volume_high,
-        volume_low,
+        volumehigh,
+        volumelow,
         time,
         digits,
         spread,
         spread_float,
-        ticks_book_depth,
+        ticks_bookdepth,
         trade_calc_mode,
         trade_mode,
         start_time,
         expiration_time,
         trade_stops_level,
         trade_freeze_level,
-        trade_exe_mode,
+        trade_exemode,
         swap_mode,
         swap_rollover3days,
         margin_hedged_use_leg,
@@ -386,8 +386,8 @@ fn decode_symbol_info(reader: &mut Reader) -> Result<SymbolInfo> {
         lasthigh: last_high,
         lastlow: last_low,
         volume_real,
-        volumehigh_real: volume_high_real,
-        volumelow_real: volume_low_real,
+        volumehigh_real,
+        volumelow_real,
         option_strike,
         point,
         trade_tick_value,
@@ -456,15 +456,15 @@ impl Mt5Client {
         let connected = resp[6] != 0;
         let dlls_allowed = resp[7] != 0;
         let trade_allowed = resp[8] != 0;
-        let trade_api_disabled = resp[9] != 0;
+        let tradeapi_disabled = resp[9] != 0;
         let email_enabled = resp[10] != 0;
         let ftp_enabled = resp[11] != 0;
         let notifications_enabled = resp[4] != 0;
         let mqid = resp[5] != 0;
 
         let build = u16::from_le_bytes([resp[0], resp[1]]) as i64;
-        let max_bars = u32::from_le_bytes([resp[12], resp[13], resp[14], resp[15]]) as i64;
-        let code_page = u16::from_le_bytes([resp[17], resp[18]]) as i64;
+        let maxbars = u32::from_le_bytes([resp[12], resp[13], resp[14], resp[15]]) as i64;
+        let codepage = u16::from_le_bytes([resp[17], resp[18]]) as i64;
         let ping_last = u16::from_le_bytes([resp[21], resp[22]]) as i64;
         let community_balance = f64::from_le_bytes([
             resp[24], resp[25], resp[26], resp[27], resp[28], resp[29], resp[30], resp[31],
@@ -478,7 +478,7 @@ impl Mt5Client {
         let language = read_string_at_offset(&resp, 1081);
         let path = read_string_at_offset(&resp, 1601);
         let data_path = read_string_at_offset(&resp, 2121);
-        let common_data_path = read_string_at_offset(&resp, 2641);
+        let commondata_path = read_string_at_offset(&resp, 2641);
 
         Ok(TerminalInfo {
             community_account,
@@ -486,14 +486,14 @@ impl Mt5Client {
             connected,
             dlls_allowed,
             trade_allowed,
-            trade_api_disabled,
+            tradeapi_disabled,
             email_enabled,
             ftp_enabled,
             notifications_enabled,
             mqid,
             build,
-            max_bars,
-            code_page,
+            maxbars,
+            codepage,
             ping_last,
             community_balance,
             retransmission,
@@ -502,7 +502,7 @@ impl Mt5Client {
             language,
             path,
             data_path,
-            common_data_path,
+            commondata_path,
         })
     }
 
@@ -917,7 +917,10 @@ impl Mt5Client {
     pub fn order_check(&self, request: &TradeRequest) -> Result<TradeCheckResult> {
         let data = encode_trade_request(request);
         let resp = self.send(CMD_ORDER_CHECK, &data)?;
-        decode_check_result(&resp)
+        let mut result = decode_check_result(&resp)?;
+        // Python echoes the request back in the result.
+        result.request = request.clone();
+        Ok(result)
     }
 
     /// Send a trade request to the terminal for execution (Python `mt5.order_send`).
@@ -925,7 +928,10 @@ impl Mt5Client {
     pub fn order_send(&self, request: &TradeRequest) -> Result<TradeResult> {
         let data = encode_trade_request(request);
         let resp = self.send(CMD_ORDER_SEND, &data)?;
-        decode_trade_result(&resp)
+        let mut result = decode_trade_result(&resp)?;
+        // Python echoes the request back in the result.
+        result.request = request.clone();
+        Ok(result)
     }
 }
 
@@ -1031,12 +1037,13 @@ fn decode_check_result(data: &[u8]) -> Result<TradeCheckResult> {
         margin_free: read_f64(36),
         margin_level: read_f64(44),
         comment,
+        request: TradeRequest::default(), // filled in by `order_check`
     })
 }
 
 /// Decode the 260-byte order_send response:
 ///   retcode(4) deal(8) order(8) volume(8) price(8) bid(8) ask(8)
-///   comment(200) request_id(4) retcode_ext(4)
+///   comment(200) request_id(4) retcode_external(4)
 fn decode_trade_result(data: &[u8]) -> Result<TradeResult> {
     if data.len() < TRADE_RESULT_TOTAL {
         return Err(Mt5Error::InvalidResponse(format!(
@@ -1051,7 +1058,7 @@ fn decode_trade_result(data: &[u8]) -> Result<TradeResult> {
     let order = i64::from_le_bytes(data[12..20].try_into().unwrap());
     let comment = decode_fixed_string(data, 52, TRADE_RESULT_COMMENT_SLOT)?;
     let request_id = u32::from_le_bytes(data[252..256].try_into().unwrap());
-    let retcode_ext = i32::from_le_bytes(data[256..260].try_into().unwrap());
+    let retcode_external = i32::from_le_bytes(data[256..260].try_into().unwrap());
     Ok(TradeResult {
         retcode,
         deal,
@@ -1062,7 +1069,8 @@ fn decode_trade_result(data: &[u8]) -> Result<TradeResult> {
         ask: read_f64(44),
         comment,
         request_id,
-        retcode_ext,
+        retcode_external,
+        request: TradeRequest::default(), // filled in by `order_send`
     })
 }
 
@@ -1079,7 +1087,7 @@ fn parse_positions_response(data: &[u8]) -> Result<Vec<TradePosition>> {
     for _ in 0..count {
         // Wire layout (go-mt5 decodePositions, verified against a real capture):
         //   ticket time time_msc time_update time_update_msc type magic
-        //   identifier reason volume price_open price_sl price_tp
+        //   identifier reason volume price_open sl tp
         //   price_current commission swap profit symbol comment external_id
         let ticket = reader.read_i64();
         let time = reader.read_i64();
@@ -1092,8 +1100,8 @@ fn parse_positions_response(data: &[u8]) -> Result<Vec<TradePosition>> {
         let reason = reader.read_u32() as i32;
         let volume = reader.read_f64();
         let price_open = reader.read_f64();
-        let price_sl = reader.read_f64();
-        let price_tp = reader.read_f64();
+        let sl = reader.read_f64();
+        let tp = reader.read_f64();
         let price_current = reader.read_f64();
         let commission = reader.read_f64();
         let swap = reader.read_f64();
@@ -1119,8 +1127,8 @@ fn parse_positions_response(data: &[u8]) -> Result<Vec<TradePosition>> {
             volume,
             price_open,
             price_current,
-            price_sl,
-            price_tp,
+            sl,
+            tp,
             commission,
             swap,
             profit,
@@ -1162,8 +1170,8 @@ fn parse_orders_response(data: &[u8]) -> Result<Vec<TradeOrder>> {
         let volume_current = reader.read_f64();
         let price_open = reader.read_f64();
         let price_current = reader.read_f64();
-        let price_sl = reader.read_f64();
-        let price_tp = reader.read_f64();
+        let sl = reader.read_f64();
+        let tp = reader.read_f64();
         let price_stoplimit = reader.read_f64();
         let symbol = reader.read_fixed_string(64);
         let comment = reader.read_fixed_string(64);
@@ -1192,8 +1200,8 @@ fn parse_orders_response(data: &[u8]) -> Result<Vec<TradeOrder>> {
             volume_current,
             price_open,
             price_current,
-            price_sl,
-            price_tp,
+            sl,
+            tp,
             price_stoplimit,
             symbol,
             comment,
@@ -1687,7 +1695,7 @@ mod tests {
         assert!((res.ask - 1.16218).abs() < 1e-9);
         assert_eq!(res.comment, "Request executed");
         assert_eq!(res.request_id, 2316072679);
-        assert_eq!(res.retcode_ext, 0);
+        assert_eq!(res.retcode_external, 0);
         assert!(res.is_ok());
     }
 
@@ -1829,8 +1837,8 @@ mod tests {
         assert_eq!(p0.reason, 3);
         assert_eq!(p0.volume, 0.01);
         assert_eq!(p0.price_open, 1.16218);
-        assert_eq!(p0.price_sl, 0.0);
-        assert_eq!(p0.price_tp, 0.0);
+        assert_eq!(p0.sl, 0.0);
+        assert_eq!(p0.tp, 0.0);
         assert_eq!(p0.commission, 0.0);
         assert_eq!(p0.swap, 0.0);
         assert_eq!(p0.symbol, "EURUSD");
@@ -2028,6 +2036,9 @@ mod tests {
         assert_eq!(res.retcode, 0);
         assert_eq!(res.margin, 2.0);
         assert_eq!(res.comment, "Done");
+        // Python echoes the request back in the result.
+        assert_eq!(res.request.symbol, "EURUSD");
+        assert_eq!(res.request.volume, 0.01);
         assert_eq!(
             pipe.requests_for(160)[0].len(),
             232,
@@ -2054,6 +2065,7 @@ mod tests {
         assert_eq!(res.retcode, 10009);
         assert_eq!(res.deal, 18785220);
         assert_eq!(res.order, 27822128);
+        assert_eq!(res.request.symbol, "EURUSD");
         assert_eq!(pipe.requests_for(161)[0].len(), 232);
     }
 
@@ -2107,8 +2119,8 @@ mod tests {
         b.extend_from_slice(&0.01f64.to_le_bytes()); // volume_current
         b.extend_from_slice(&1.15f64.to_le_bytes()); // price_open
         b.extend_from_slice(&1.16f64.to_le_bytes()); // price_current
-        b.extend_from_slice(&0f64.to_le_bytes()); // price_sl
-        b.extend_from_slice(&0f64.to_le_bytes()); // price_tp
+        b.extend_from_slice(&0f64.to_le_bytes()); // sl
+        b.extend_from_slice(&0f64.to_le_bytes()); // tp
         b.extend_from_slice(&0f64.to_le_bytes()); // price_stoplimit
         b.extend_from_slice(&utf16_fixed(symbol, 64)); // symbol
         b.extend_from_slice(&utf16_fixed("", 64)); // comment
@@ -2265,7 +2277,7 @@ mod tests {
         let mut payload = vec![0u8; 2800];
         payload[0..2].copy_from_slice(&6090u16.to_le_bytes()); // build
         payload[6] = 1; // connected
-        payload[12..16].copy_from_slice(&100_000u32.to_le_bytes()); // max_bars
+        payload[12..16].copy_from_slice(&100_000u32.to_le_bytes()); // maxbars
         payload[21..23].copy_from_slice(&10u16.to_le_bytes()); // ping_last
         payload[24..32].copy_from_slice(&1.5f64.to_le_bytes()); // community_balance
         put_str16(&mut payload, 41, "Company Inc.");
@@ -2279,7 +2291,7 @@ mod tests {
         let info = client.terminal_info().unwrap();
         assert!(info.connected);
         assert_eq!(info.build, 6090);
-        assert_eq!(info.max_bars, 100_000);
+        assert_eq!(info.maxbars, 100_000);
         assert_eq!(info.company, "Company Inc.");
         assert_eq!(info.name, "MetaTrader 5");
         assert_eq!(info.path, "C:\\MT5");
