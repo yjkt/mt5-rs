@@ -31,6 +31,15 @@ jobs:
       - name: Run unit tests
         run: cargo test --locked
 
+      # Coverage gate: every public function must be exercised by a test
+      # (fixture decode or mock-pipe round-trip). The threshold is deliberately
+      # conservative; raise it as more commands get covered.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Coverage gate
+        run: cargo llvm-cov --fail-under-lines 75
+
       - name: Release build
         run: cargo build --release --locked
 

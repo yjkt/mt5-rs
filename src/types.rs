@@ -203,6 +203,7 @@ pub struct TradePosition {
     pub price_current: f64,
     pub price_sl: f64,
     pub price_tp: f64,
+    pub commission: f64,
     pub swap: f64,
     pub profit: f64,
     pub symbol: String,

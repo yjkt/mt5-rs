@@ -14,6 +14,17 @@ use crate::error::{Mt5Error, Result};
 
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
+/// Transport abstraction over the MT5 IPC pipe.
+///
+/// `NamedPipeClient` is the real Windows implementation; tests can inject an
+/// in-memory mock to exercise the full request/response flow without a
+/// running terminal (mirrors go-mt5's mock pipe).
+pub trait Transport: Send {
+    /// Send a command with its payload and return the response data
+    /// (after the 8-byte cmd_echo + success header).
+    fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>>;
+}
+
 pub struct NamedPipeClient {
     handle: HANDLE,
     // Set when the pipe handle is no longer usable (e.g. the terminal closed
@@ -166,6 +177,12 @@ impl NamedPipeClient {
         } else {
             Ok(Vec::new())
         }
+    }
+}
+
+impl Transport for NamedPipeClient {
+    fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>> {
+        NamedPipeClient::send(self, cmd, data)
     }
 }
 

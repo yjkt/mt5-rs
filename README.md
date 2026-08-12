@@ -13,6 +13,15 @@ Compatible with Python `MetaTrader5` library API.
 - Full compatibility with Python `MetaTrader5` library (32/32 functions)
 - Support MT5 Build 5836+
 
+## Testing
+
+- 30+ unit tests: byte-exact fixture decodes captured from real terminals and
+  mock-pipe round-trips that verify request encoding + response decoding for
+  every command, without needing MT5 running.
+- CI runs `fmt`, `clippy -D warnings`, tests, release build, an MSRV check, and
+  a coverage gate (`cargo llvm-cov --fail-under-lines 75`). The named-pipe
+  transport itself is exercised by live terminal tests (see `mt5-spike`).
+
 ## Quick Start
 
 ```rust
