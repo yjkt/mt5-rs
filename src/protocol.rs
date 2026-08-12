@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL,
@@ -16,6 +17,12 @@ const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
 pub struct NamedPipeClient {
     handle: HANDLE,
+    // Set when the pipe handle is no longer usable (e.g. the terminal closed
+    // it after an unsupported command). Subsequent calls fail fast with a
+    // clear error instead of reusing a dead handle; the caller must create a
+    // new client (re-initialize). Interior mutability so existing &self API
+    // keeps working.
+    broken: Cell<bool>,
 }
 
 impl NamedPipeClient {
@@ -57,10 +64,29 @@ impl NamedPipeClient {
             )));
         }
 
-        Ok(Self { handle })
+        Ok(Self {
+            handle,
+            broken: Cell::new(false),
+        })
+    }
+
+    fn mark_broken(&self, err: Mt5Error) -> Mt5Error {
+        if !self.broken.get() {
+            self.broken.set(true);
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+        err
     }
 
     pub fn send(&self, cmd: u32, data: &[u8]) -> Result<Vec<u8>> {
+        if self.broken.get() {
+            return Err(Mt5Error::ConnectionFailed(
+                "Pipe connection was closed by the terminal (broken pipe); re-initialize the client".into(),
+            ));
+        }
+
         let total_len = 4 + data.len();
         let mut request = Vec::with_capacity(8 + data.len());
         request.extend_from_slice(&(total_len as u32).to_le_bytes());
@@ -78,7 +104,7 @@ impl NamedPipeClient {
             );
 
             if result == 0 {
-                return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
             }
         }
 
@@ -99,7 +125,7 @@ impl NamedPipeClient {
             );
 
             if result == 0 {
-                return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
             }
         }
 
@@ -127,7 +153,7 @@ impl NamedPipeClient {
                 );
 
                 if result == 0 {
-                    return Err(Mt5Error::IoError(std::io::Error::last_os_error()));
+                    return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
                 }
 
                 total_read += bytes_read as usize;
@@ -265,7 +291,7 @@ fn find_terminal64_paths() -> Result<Vec<String>> {
 
 fn get_process_path(pid: u32) -> Result<String> {
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle == std::ptr::null_mut() {
+    if handle.is_null() {
         return Err(Mt5Error::ConnectionFailed(format!(
             "Failed to open process {}",
             pid
