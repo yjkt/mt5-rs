@@ -1,5 +1,7 @@
 # mt5-rs
 
+[![CI](https://github.com/nirvagold/mt5-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/nirvagold/mt5-rs/actions/workflows/ci.yml)
+
 A pure Rust library for MetaTrader 5 IPC communication. No Python dependency.
 
 Compatible with Python `MetaTrader5` library API.
