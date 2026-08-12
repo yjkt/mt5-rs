@@ -7,6 +7,12 @@ pub struct Mt5Client {
     build: i32,
 }
 
+impl Default for Mt5Client {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Mt5Client {
     pub fn new() -> Self {
         Self { pipe: None, build: 0 }
@@ -46,7 +52,8 @@ impl Mt5Client {
         data.extend_from_slice(&encode_string(password));
         data.extend_from_slice(&encode_string(server));
 
-        let resp = pipe.send(4, &data)?;
+        // CmdLogin = 100 (bukan 4 yang dipakai initialize).
+        let resp = pipe.send(100, &data)?;
         if resp.len() < 4 {
             return Err(Mt5Error::InvalidResponse("Response too short".into()));
         }
@@ -54,7 +61,7 @@ impl Mt5Client {
         let status = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
         if status != 0 {
             return Err(Mt5Error::CommandFailed {
-                cmd: 4,
+                cmd: 100,
                 error: format!("Login failed with status: {}", status),
             });
         }
@@ -260,12 +267,16 @@ impl Mt5Client {
         })
     }
 
+    /// Version info. `build` is read from the terminal (cmd 180). The Python
+    /// library reports API version 500 and a build date from cmd 1, but MT5
+    /// builds >= 5836 close the pipe for cmd 1 — so `version` always reports
+    /// API 500 and leaves `build_date` empty rather than fabricating it.
     pub fn version(&self) -> Result<VersionInfo> {
         let info = self.terminal_info()?;
         Ok(VersionInfo {
-            version: info.build as i32,
+            version: 500,
             build: info.build as i32,
-            build_date: format!("{} ({})", info.company, info.name),
+            build_date: String::new(),
         })
     }
 
@@ -816,29 +827,46 @@ impl Mt5Client {
         Ok(status == 0)
     }
 
-    /// 计算订单所需保证金（本地计算，不使用IPC）
-    /// 根据Python测试验证的公式：margin = volume × price × margin_initial / 4
+    /// Calculate required margin for a trade (local calculation, no IPC).
+    ///
+    /// Uses `margin_initial` from symbol info when the broker provides it
+    /// (margin = volume × price × margin_initial / 4). Some brokers return
+    /// `margin_initial = 0` (Elev8 demo returns 0); in that case fall back to
+    /// `volume × price × trade_contract_size / leverage` from account info,
+    /// which matches the terminal's own margin within broker rounding.
+    ///
+    /// Note: this is an approximation. For the exact margin the terminal would
+    /// reserve, use `order_check`, whose response includes the real margin.
     pub fn order_calc_margin(&self, _action: i32, symbol: &str, volume: f64, price: f64) -> Result<f64> {
-        // 获取symbol info以获取margin_initial
-        let symbol_info = self.symbol_info(symbol)?;
-        
-        // 根据Python测试验证的公式计算
-        // margin = volume × price × margin_initial / 4
-        let margin_initial = symbol_info.unwrap().margin_initial;
-        let margin = volume * price * margin_initial / 4.0;
-        
+        let symbol_info = self.symbol_info(symbol)?.ok_or_else(|| {
+            Mt5Error::CommandFailed {
+                cmd: 0,
+                error: format!("symbol not found: {symbol}"),
+            }
+        })?;
+
+        if symbol_info.margin_initial > 0.0 {
+            return Ok(volume * price * symbol_info.margin_initial / 4.0);
+        }
+
+        // Broker tidak menyediakan margin_initial: fallback berbasis leverage.
+        let account = self.account_info()?;
+        let leverage = if account.leverage > 0 { account.leverage as f64 } else { 100.0 };
+        let margin = volume * price * symbol_info.trade_contract_size / leverage;
         Ok(margin)
     }
 
-    /// 计算订单预期利润（本地计算，不使用IPC）
-    /// 公式：profit = volume × (price_close - price_open) × contract_size
+    /// Calculate expected profit for a trade (local calculation, no IPC).
+    /// profit = volume × (price_close - price_open) × trade_contract_size
     pub fn order_calc_profit(&self, _action: i32, symbol: &str, volume: f64, price_open: f64, price_close: f64) -> Result<f64> {
-        // 获取symbol info以获取contract_size
-        let symbol_info = self.symbol_info(symbol)?;
-        
-        // 计算利润
-        let profit = volume * (price_close - price_open) * symbol_info.unwrap().trade_contract_size;
-        
+        let symbol_info = self.symbol_info(symbol)?.ok_or_else(|| {
+            Mt5Error::CommandFailed {
+                cmd: 0,
+                error: format!("symbol not found: {symbol}"),
+            }
+        })?;
+
+        let profit = volume * (price_close - price_open) * symbol_info.trade_contract_size;
         Ok(profit)
     }
 
@@ -1426,10 +1454,6 @@ impl<'a> Reader<'a> {
         f64::from_le_bytes(bytes)
     }
 
-    fn read_bool(&mut self) -> bool {
-        self.read_i64() != 0
-    }
-
     fn read_bool1(&mut self) -> bool {
         if self.error || self.pos + 1 > self.data.len() {
             self.error = true;
@@ -1481,6 +1505,24 @@ impl<'a> Reader<'a> {
         self.pos = end;
         String::from_utf16_lossy(&chars)
     }
+}
+
+fn read_string_at_offset(data: &[u8], offset: usize) -> String {
+    if offset >= data.len() {
+        return String::new();
+    }
+    
+    let mut chars = Vec::new();
+    let mut pos = offset;
+    while pos + 1 < data.len() {
+        let c = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+        if c == 0 {
+            break;
+        }
+        chars.push(c);
+    }
+    String::from_utf16_lossy(&chars)
 }
 
 #[cfg(test)]
@@ -1592,22 +1634,4 @@ mod tests {
         let reject = TradeResult { retcode: retcodes::REJECT, ..Default::default() };
         assert!(!reject.is_ok());
     }
-}
-
-fn read_string_at_offset(data: &[u8], offset: usize) -> String {
-    if offset >= data.len() {
-        return String::new();
-    }
-    
-    let mut chars = Vec::new();
-    let mut pos = offset;
-    while pos + 1 < data.len() {
-        let c = u16::from_le_bytes([data[pos], data[pos + 1]]);
-        pos += 2;
-        if c == 0 {
-            break;
-        }
-        chars.push(c);
-    }
-    String::from_utf16_lossy(&chars)
 }

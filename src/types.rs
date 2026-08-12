@@ -269,20 +269,15 @@ pub struct BookInfo {
 }
 
 /// Trade operation type. Values match Python `mt5.TRADE_ACTION_*`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TradeAction {
+    #[default]
     Deal = 1,
     Pending = 5,
     SLTP = 6,
     Modify = 7,
     Remove = 8,
     CloseBy = 10,
-}
-
-impl Default for TradeAction {
-    fn default() -> Self {
-        TradeAction::Deal
-    }
 }
 
 /// Order type. Values match Python `mt5.ORDER_TYPE_*`.
