@@ -1,15 +1,14 @@
+use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL,
-    OPEN_EXISTING,
+    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING,
+};
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW};
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS, PROCESSENTRY32W,
-};
-use sha2::{Sha256, Digest};
 
 use crate::error::{Mt5Error, Result};
 
@@ -36,10 +35,7 @@ impl NamedPipeClient {
             }
         };
 
-        let pipe_name_wide: Vec<u16> = name
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+        let pipe_name_wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
             WaitNamedPipeW(pipe_name_wide.as_ptr(), 500);
@@ -153,7 +149,9 @@ impl NamedPipeClient {
                 );
 
                 if result == 0 {
-                    return Err(self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error())));
+                    return Err(
+                        self.mark_broken(Mt5Error::IoError(std::io::Error::last_os_error()))
+                    );
                 }
 
                 total_read += bytes_read as usize;
@@ -197,7 +195,10 @@ pub fn compute_pipe_name(terminal_path: &str) -> String {
     hasher.update(&buf);
     let result = hasher.finalize();
 
-    format!(r"\\.\pipe\MT5.Terminal.{}", hex::encode(result).to_uppercase())
+    format!(
+        r"\\.\pipe\MT5.Terminal.{}",
+        hex::encode(result).to_uppercase()
+    )
 }
 
 pub fn discover_mt5_pipe() -> String {
@@ -214,10 +215,7 @@ pub fn discover_mt5_pipe() -> String {
 }
 
 fn test_pipe_connection(pipe_name: &str) -> bool {
-    let pipe_name_wide: Vec<u16> = pipe_name
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let pipe_name_wide: Vec<u16> = pipe_name.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
         WaitNamedPipeW(pipe_name_wide.as_ptr(), 500);
